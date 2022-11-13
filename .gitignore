@@ -1,0 +1,10 @@
+node_modules
+jspm_packages
+coverage
+.serverless
+.env
+.DS_Store
+.esbuild
+cdk.out
+.eslintcache
+.npmrc
