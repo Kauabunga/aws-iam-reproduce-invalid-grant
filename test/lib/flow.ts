@@ -1,7 +1,7 @@
 import { backOff } from "exponential-backoff";
 import parseISO from "date-fns/parseISO";
 import isValid from "date-fns/isValid";
-import formatDistance from "date-fns/formatDistance";
+import formatDistanceStrict from "date-fns/formatDistanceStrict";
 
 import { executeLambda, getExecuteLambdaResponse } from "./lambda";
 import { authenticate } from "./oauth";
@@ -43,19 +43,20 @@ export async function retryValidateClient(
   ClientId: string,
   ClientSecret: string
 ) {
-  const start = Date.now();
-
   return validateClient(ClientId, ClientSecret).catch((err) => {
     console.error("Client failed first attempt", { ClientId, ClientSecret });
+
     return backOff(() => validateClient(ClientId, ClientSecret), {
       jitter: "full",
       maxDelay: 10000,
       numOfAttempts: 100,
-    }).then(() => {
+    }).then(async () => {
+      const debug = await getDebugData(ClientId);
+
       console.error("Client resolved", {
         ClientId,
         ClientSecret,
-        time: Date.now() - start,
+        debug,
       });
     });
   });
@@ -93,27 +94,33 @@ export async function handleInvalidResponse(
   clientId: string,
   tokenResponse: Response
 ) {
-  const [text, client] = await Promise.all([
+  const [text, debug] = await Promise.all([
     tokenResponse.text().catch((err) => err),
-    getClient(clientId).catch((err) => err),
+    getDebugData(clientId),
   ]);
-
-  const clientLastModifiedDate = parseISO(
-    client?.UserPoolClient?.LastModifiedDate
-  );
-  const requestedAtDate = new Date();
-  const distanceSinceLastModifiedDate = isValid(clientLastModifiedDate)
-    ? formatDistance(requestedAtDate, clientLastModifiedDate)
-    : "Invalid Client LastModifiedDate";
 
   console.error("Invalid client error:", {
     clientId,
     message,
-    distanceSinceLastModifiedDate,
-    requestedAt: requestedAtDate.toISOString(),
     text,
-    client,
+    debug,
   });
 
   throw new Error(`Invalid Client Error ${clientId} (${tokenResponse.status})`);
+}
+
+export async function getDebugData(clientId: string) {
+  const client = await getClient(clientId).catch((err) => err);
+  const UserPoolClient = client?.UserPoolClient;
+  const clientLastModifiedDate = parseISO(UserPoolClient?.LastModifiedDate);
+  const now = new Date();
+  const distanceSinceLastModifiedDate = isValid(clientLastModifiedDate)
+    ? formatDistanceStrict(now, clientLastModifiedDate)
+    : "Invalid Client LastModifiedDate";
+
+  return {
+    distanceSinceLastModifiedDate,
+    now: now.toISOString(),
+    UserPoolClient,
+  };
 }

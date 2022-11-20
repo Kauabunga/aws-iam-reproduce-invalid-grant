@@ -1,4 +1,4 @@
-import { retryValidateClient } from "./lib";
+import { getDebugData, retryValidateClient } from "./lib";
 
 describe("Test create client", () => {
   test("Validate a single (existing) client", async () => {
@@ -12,7 +12,12 @@ describe("Test create client", () => {
     // Validate client can authenticate
     await Promise.all(
       credentials.map((credential) =>
-        retryValidateClient(credential.ClientId, credential.ClientSecret)
+        retryValidateClient(credential.ClientId, credential.ClientSecret).then(
+          async () => {
+            const debug = await getDebugData(credential.ClientId);
+            console.log("Client success", debug);
+          }
+        )
       )
     );
   });
