@@ -3,6 +3,7 @@ import { COGNITO_USER_POOL_ID } from "./constants";
 
 const cognito = new CognitoIdentityServiceProvider({
   apiVersion: "2016-04-18",
+  region: "ap-southeast-2",
 });
 
 const DEFAULT_USER_POOL_CLIENT = {
@@ -34,23 +35,6 @@ export async function createUserPoolClient(name: string, scopes: string[]) {
 }
 
 /**
- * Aux function to get user pool client
- *
- * @param clientId
- * @returns
- *
- * @private
- */
-export async function getUserPoolClient(clientId: string) {
-  return cognito
-    .describeUserPoolClient({
-      UserPoolId: COGNITO_USER_POOL_ID,
-      ClientId: clientId,
-    })
-    .promise();
-}
-
-/**
  * Aux function to update the user pool client oauth scopes
  *
  * @param clientId
@@ -69,6 +53,23 @@ export async function updateUserPoolClientOAuthScopes(
       ClientId: clientId,
       AllowedOAuthScopes: scopes,
       ...DEFAULT_USER_POOL_CLIENT,
+    })
+    .promise();
+}
+
+/**
+ * Aux function to get user pool client
+ *
+ * @param clientId
+ * @returns
+ *
+ * @private
+ */
+export async function getUserPoolClient(clientId: string) {
+  return cognito
+    .describeUserPoolClient({
+      UserPoolId: COGNITO_USER_POOL_ID,
+      ClientId: clientId,
     })
     .promise();
 }

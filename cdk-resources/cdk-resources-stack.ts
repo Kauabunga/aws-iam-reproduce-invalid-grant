@@ -1,6 +1,6 @@
 import * as path from "path";
 
-import { App, Stack, Duration, RemovalPolicy } from "aws-cdk-lib";
+import { App, Stack, RemovalPolicy } from "aws-cdk-lib";
 import {
   AccessLogFormat,
   AuthorizationType,
@@ -11,7 +11,6 @@ import {
   MethodLoggingLevel,
   ResponseType,
   RestApi,
-  SecurityPolicy,
 } from "aws-cdk-lib/aws-apigateway";
 import {
   UserPool,
@@ -22,24 +21,38 @@ import { Effect, Policy, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { Runtime, Tracing } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 export class CdkResourcesStack extends Stack {
   constructor(scope: App, id: string) {
-    super(scope, id);
+    super(scope, id, {
+      env: {
+        account: process.env.CDK_DEFAULT_ACCOUNT,
+        region: "ap-southeast-2",
+      },
+    });
 
-    const cognitoPool = this.setupCognitoPool();
-
-    this.setupApiGateway(cognitoPool);
-
+    const cognitoDomainName = "reproduce-invalid-grant";
+    const cognitoPool = this.setupCognitoPool(cognitoDomainName);
+    const api = this.setupApiGateway(cognitoPool);
     this.setupUserClientLambda(cognitoPool);
+
+    new StringParameter(this, "ssm-cognito-token-url", {
+      parameterName: "/reproduce-aws-invalid-grant/cognito-token-url",
+      stringValue: `https://${cognitoDomainName}.auth.ap-southeast-2.amazoncognito.com/oauth2/token`,
+    });
+    new StringParameter(this, "ssm-apigateway-url", {
+      parameterName: "/reproduce-aws-invalid-grant/apigateway-url",
+      stringValue: api.url,
+    });
   }
 
   /**
    * Create the cognito pool
    */
-  setupCognitoPool() {
+  setupCognitoPool(domainPrefix: string) {
     const cognitoPool = new UserPool(this, "cognito-account-external", {
-      userPoolName: "account-external-pool",
+      userPoolName: "aws-reproduce-external-pool",
       selfSignUpEnabled: false,
       removalPolicy: RemovalPolicy.DESTROY,
     });
@@ -60,7 +73,7 @@ export class CdkResourcesStack extends Stack {
 
     new UserPoolDomain(this, "Domain", {
       userPool: cognitoPool,
-      cognitoDomain: { domainPrefix: "reproduce-invalid-grant" },
+      cognitoDomain: { domainPrefix },
     });
 
     return cognitoPool;
@@ -88,7 +101,7 @@ export class CdkResourcesStack extends Stack {
       this,
       `api-gateway-log-group-reproduce-invalid-grant`,
       {
-        logGroupName: `/awsbug/apigateway/rest-api-reproduce-invalid-grant`,
+        logGroupName: `/awsbugreproduce/apigateway/rest-api-reproduce-invalid-grant`,
         retention: RetentionDays.ONE_WEEK,
         removalPolicy: RemovalPolicy.DESTROY,
       }
@@ -96,8 +109,7 @@ export class CdkResourcesStack extends Stack {
 
     // rest api
     const restApi = new RestApi(this, `api-gateway-reproduce-iam-error`, {
-      restApiName: `AWS Reproduce iam error`,
-      description: `API Gateway - AWS Reproduce iam error`,
+      restApiName: `AWS Reproduce IAM error`,
       deployOptions: {
         metricsEnabled: true,
         tracingEnabled: true,
@@ -147,10 +159,12 @@ export class CdkResourcesStack extends Stack {
         `cognito-userpool-authorizer-${path}`,
         {
           cognitoUserPools: [cognitoPool],
-          authorizerName: "SsoAuthoriser",
+          authorizerName: "Authoriser",
         }
       ),
     });
+
+    return restApi;
   }
 
   /**
@@ -179,24 +193,25 @@ export class CdkResourcesStack extends Stack {
       { COGNITO_USER_POOL_ID: cognitoPool.userPoolId }
     );
 
-    [createLambda, getLambda, deleteLambda, updateLambda].forEach((lambda) =>
-      lambda.role?.attachInlinePolicy(
-        new Policy(this, `lambda-policy-${lambda.functionName}`, {
-          statements: [
-            new PolicyStatement({
-              effect: Effect.ALLOW,
-              actions: [
-                // Create cognito client
-                "cognito-idp:DescribeUserPoolClient",
-                "cognito-idp:CreateUserPoolClient",
-                "cognito-idp:UpdateUserPoolClient",
-                "cognito-idp:DeleteUserPoolClient",
-              ],
-              resources: [cognitoPool.userPoolArn],
-            }),
-          ],
-        })
-      )
+    [createLambda, getLambda, deleteLambda, updateLambda].forEach(
+      (lambda, index) =>
+        lambda.role?.attachInlinePolicy(
+          new Policy(this, `lambda-policy-${index}`, {
+            statements: [
+              new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                  // Create cognito client
+                  "cognito-idp:DescribeUserPoolClient",
+                  "cognito-idp:CreateUserPoolClient",
+                  "cognito-idp:UpdateUserPoolClient",
+                  "cognito-idp:DeleteUserPoolClient",
+                ],
+                resources: [cognitoPool.userPoolArn],
+              }),
+            ],
+          })
+        )
     );
   }
 
@@ -213,7 +228,7 @@ export class CdkResourcesStack extends Stack {
     environment: { [key: string]: string } = {}
   ): NodejsFunction {
     return new NodejsFunction(this, `${functionName}-lambda`, {
-      functionName: `aws-reproduce-iam-invalid-grant-${functionName}`,
+      functionName: `aws-reproduce-invalid-grant-${functionName}`,
       entry: path.join(__dirname, `../lambdas/${entry}`),
       environment,
       runtime: Runtime.NODEJS_16_X,

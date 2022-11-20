@@ -8,3 +8,4 @@ coverage
 cdk.out
 .eslintcache
 .npmrc
+yarn-error.log
